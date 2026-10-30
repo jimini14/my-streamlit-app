@@ -43,8 +43,8 @@ if st.button("번역하기"):
             response = client.responses.create(
                 model="gpt-4o-mini",
                 input=[
-                    {"role": "system", "content":    },
-                    {"role": "user", "content":    }
+                    {"role": "system", "content":prompt},
+                    {"role": "user", "content":prompt}
                 ]
             )
 
