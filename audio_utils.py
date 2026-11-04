@@ -6,7 +6,7 @@ def transcribe_audio(client: OpenAI, audio_file) -> str:
     사용자의 음성 입력(audio_input 또는 오디오 파일)을 텍스트로 변환(STT)합니다.
     """
     transcript = client.audio.transcriptions.create(
-        model="whisper-1",
+        model="gpt-4o-mini-transcribe",
         file=("audio.wav", audio_file, "audio/wav")
     )
     return transcript.text
