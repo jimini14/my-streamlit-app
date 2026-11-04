@@ -7,6 +7,9 @@ def update_meeting_file(uploaded_file) -> str:
     if uploaded_file is None:
         st.session_state.meeting_content = ""
         st.session_state.meeting_file_id = None
+        st.session_state.meeting_analysis = None
+        st.session_state.meeting_summary = ""
+        st.session_state.meeting_analysis_hash = None
         return ""
 
     file_id = getattr(uploaded_file, "file_id", None) or uploaded_file.name
@@ -19,4 +22,7 @@ def update_meeting_file(uploaded_file) -> str:
             raise
         st.session_state.meeting_content = content
         st.session_state.meeting_file_id = file_id
+        st.session_state.meeting_analysis = None
+        st.session_state.meeting_summary = ""
+        st.session_state.meeting_analysis_hash = None
     return st.session_state.meeting_content
