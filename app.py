@@ -124,6 +124,124 @@ with col1:
                     st.session_state.schedules.pop(i)
                     st.rerun()
 
+# 인적사항 기입란
+st.divider()
+st.subheader("👤 사용자 인적사항")
+
+# 사용자 정보 초기화
+if "profile" not in st.session_state:
+    st.session_state.profile = {}
+
+profile = st.session_state.profile
+
+# 인적사항 입력
+with st.form("profile_form"):
+
+    name = st.text_input(
+        "이름",
+        value=profile.get("name", "")
+    )
+
+    department = st.text_input(
+        "부서",
+        value=profile.get("department", "")
+    )
+
+    position = st.text_input(
+        "직책",
+        value=profile.get("position", "")
+    )
+
+    email = st.text_input(
+        "이메일",
+        value=profile.get("email", "")
+    )
+
+    phone = st.text_input(
+        "연락처",
+        value=profile.get("phone", "")
+    )
+
+    profile_submit = st.form_submit_button("인적사항 저장")
+
+# 정보 저장
+if profile_submit:
+
+    st.session_state.profile = {
+        "name": name,
+        "department": department,
+        "position": position,
+        "email": email,
+        "phone": phone
+    }
+
+    st.success("인적사항이 저장되었습니다.")
+
+# 저장된 정보 확인
+if st.session_state.profile:
+
+    st.subheader("📋 저장된 인적사항")
+
+    st.write(st.session_state.profile)
+
+# 키워드 분석 및 분류 코드
+st.divider()
+st.subheader("🔍 키워드 분석 및 분류")
+
+# 키워드 분류 함수
+def classify_keyword(text):
+
+    keyword_dict = {
+        "캘린더": ["일정", "캘린더", "예약", "회의 시간"],
+        "To-do List": ["할 일", "업무", "과제", "작업"],
+        "이메일": ["이메일", "메일", "발송", "보내줘"],
+        "회의록 요약": ["회의록", "요약", "회의 내용"],
+        "인적사항": ["이름", "부서", "직책", "연락처"]
+    }
+
+    result = []
+    found_keywords = []
+
+    for category, keywords in keyword_dict.items():
+
+        for keyword in keywords:
+
+            if keyword in text:
+                found_keywords.append(keyword)
+
+                if category not in result:
+                    result.append(category)
+
+    if not result:
+        result = ["일반 질문"]
+
+    return result, found_keywords
+
+
+# 분석할 문장 입력
+keyword_text = st.text_area(
+    "분석할 문장을 입력하세요",
+    placeholder="예: 내일 회의 일정을 등록하고 이메일을 보내줘"
+)
+
+# 분석 버튼
+if st.button("키워드 분석"):
+
+    if keyword_text.strip():
+
+        categories, keywords = classify_keyword(keyword_text)
+
+        st.subheader("📊 분석 결과")
+
+        st.write("분류 결과:", ", ".join(categories))
+
+        st.write(
+            "추출된 키워드:",
+            ", ".join(keywords) if keywords else "없음"
+        )
+
+    else:
+        st.warning("분석할 문장을 입력하세요.")
 
 # 지시 영역
 with st.form("task_form"):
