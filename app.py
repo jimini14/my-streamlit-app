@@ -19,9 +19,36 @@ sys_role = """
 
 # 상태 초기화
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = []  
 
-# 캘린더 + To-do List
+# ==================================================
+# 추가 기능 1. 캘린더
+# ==================================================
+
+import calendar
+from datetime import date
+
+st.divider()
+st.title("📅 ABLE 일정 및 업무 관리")
+
+# 상태 초기화
+if "schedules" not in st.session_state:
+    st.session_state.schedules = []
+
+if "todos" not in st.session_state:
+    st.session_state.todos = []
+
+if "calendar_year" not in st.session_state:
+    st.session_state.calendar_year = date.today().year
+
+if "calendar_month" not in st.session_state:
+    st.session_state.calendar_month = date.today().month
+
+if "selected_date" not in st.session_state:
+    st.session_state.selected_date = date.today()
+
+
+# 캘린더와 To-do List 화면 배치
 col1, col2 = st.columns([2, 1])
 
 with col1:
@@ -124,124 +151,65 @@ with col1:
                     st.session_state.schedules.pop(i)
                     st.rerun()
 
-# 인적사항 기입란
+
+# ==================================================
+# 추가 기능 2. To-do List
+# ==================================================
+
+with col2:
+    st.subheader("✅ To-do List")
+
+    # 업무 추가
+    with st.form("todo_form", clear_on_submit=True):
+        task = st.text_input("새로운 할 일")
+        todo_submit = st.form_submit_button("업무 추가")
+
+    if todo_submit:
+        if task.strip():
+            st.session_state.todos.append({
+                "task": task.strip(),
+                "done": False
+            })
+            st.success("할 일이 추가되었습니다.")
+        else:
+            st.warning("할 일을 입력하세요.")
+
+    st.divider()
+
+    # 업무 진행 현황
+    total = len(st.session_state.todos)
+
+    completed = sum(
+        item["done"]
+        for item in st.session_state.todos
+    )
+
+    st.write(f"완료한 업무: {completed} / {total}")
+
+    if total > 0:
+        st.progress(completed / total)
+
+    # 업무 목록 및 완료 체크
+    for i, item in enumerate(st.session_state.todos):
+
+        c1, c2 = st.columns([5, 1])
+
+        with c1:
+            done = st.checkbox(
+                item["task"],
+                value=item["done"],
+                key=f"todo_{i}"
+            )
+
+            st.session_state.todos[i]["done"] = done
+
+        with c2:
+            if st.button("❌", key=f"todo_delete_{i}"):
+                st.session_state.todos.pop(i)
+                st.rerun()
+
 st.divider()
-st.subheader("👤 사용자 인적사항")
-
-# 사용자 정보 초기화
-if "profile" not in st.session_state:
-    st.session_state.profile = {}
-
-profile = st.session_state.profile
-
-# 인적사항 입력
-with st.form("profile_form"):
-
-    name = st.text_input(
-        "이름",
-        value=profile.get("name", "")
-    )
-
-    department = st.text_input(
-        "부서",
-        value=profile.get("department", "")
-    )
-
-    position = st.text_input(
-        "직책",
-        value=profile.get("position", "")
-    )
-
-    email = st.text_input(
-        "이메일",
-        value=profile.get("email", "")
-    )
-
-    phone = st.text_input(
-        "연락처",
-        value=profile.get("phone", "")
-    )
-
-    profile_submit = st.form_submit_button("인적사항 저장")
-
-# 정보 저장
-if profile_submit:
-
-    st.session_state.profile = {
-        "name": name,
-        "department": department,
-        "position": position,
-        "email": email,
-        "phone": phone
-    }
-
-    st.success("인적사항이 저장되었습니다.")
-
-# 저장된 정보 확인
-if st.session_state.profile:
-
-    st.subheader("📋 저장된 인적사항")
-
-    st.write(st.session_state.profile)
-
-# 키워드 분석 및 분류 코드
-st.divider()
-st.subheader("🔍 키워드 분석 및 분류")
-
-# 키워드 분류 함수
-def classify_keyword(text):
-
-    keyword_dict = {
-        "캘린더": ["일정", "캘린더", "예약", "회의 시간"],
-        "To-do List": ["할 일", "업무", "과제", "작업"],
-        "이메일": ["이메일", "메일", "발송", "보내줘"],
-        "회의록 요약": ["회의록", "요약", "회의 내용"],
-        "인적사항": ["이름", "부서", "직책", "연락처"]
-    }
-
-    result = []
-    found_keywords = []
-
-    for category, keywords in keyword_dict.items():
-
-        for keyword in keywords:
-
-            if keyword in text:
-                found_keywords.append(keyword)
-
-                if category not in result:
-                    result.append(category)
-
-    if not result:
-        result = ["일반 질문"]
-
-    return result, found_keywords
-
-
-# 분석할 문장 입력
-keyword_text = st.text_area(
-    "분석할 문장을 입력하세요",
-    placeholder="예: 내일 회의 일정을 등록하고 이메일을 보내줘"
-)
-
-# 분석 버튼
-if st.button("키워드 분석"):
-
-    if keyword_text.strip():
-
-        categories, keywords = classify_keyword(keyword_text)
-
-        st.subheader("📊 분석 결과")
-
-        st.write("분류 결과:", ", ".join(categories))
-
-        st.write(
-            "추출된 키워드:",
-            ", ".join(keywords) if keywords else "없음"
-        )
-
-    else:
-        st.warning("분석할 문장을 입력하세요.")
+st.subheader("🎤 AI 음성 비서") 
 
 # 지시 영역
 with st.form("task_form"):
