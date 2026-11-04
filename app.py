@@ -134,9 +134,25 @@ st.title("📅 ABLE 일정 및 업무 관리")
 
 col1, col2 = st.columns([2, 1])
 
+
 # ==================================================
-# 3. 캘린더
+# 3. 캘린더 (수정본)
 # ==================================================
+
+import html
+
+# 프로젝트별 색상
+PROJECT_COLORS = {
+    "일반": "#64748b",
+    "프로젝트 A": "#2563eb",
+    "프로젝트 B": "#16a34a",
+    "프로젝트 C": "#9333ea",
+    "개인 일정": "#ea580c"
+}
+
+# 추천 To-do 임시 상태
+if "calendar_recommendations" not in st.session_state:
+    st.session_state.calendar_recommendations = []
 
 with col1:
 
@@ -144,6 +160,10 @@ with col1:
 
     year = st.session_state.calendar_year
     month = st.session_state.calendar_month
+
+    # ----------------------------------------------
+    # 월 이동
+    # ----------------------------------------------
 
     c1, c2, c3 = st.columns([1, 4, 1])
 
@@ -154,6 +174,7 @@ with col1:
                 st.session_state.calendar_month = 12
             else:
                 st.session_state.calendar_month -= 1
+
             st.rerun()
 
     with c2:
@@ -166,9 +187,27 @@ with col1:
                 st.session_state.calendar_month = 1
             else:
                 st.session_state.calendar_month += 1
+
             st.rerun()
 
-    # 요일 표시
+    # ----------------------------------------------
+    # 프로젝트 색상 범례
+    # ----------------------------------------------
+
+    st.markdown("**프로젝트 구분**")
+
+    legend = "　".join(
+        f'<span style="color:{color};font-weight:bold;">'
+        f'● {html.escape(name)}</span>'
+        for name, color in PROJECT_COLORS.items()
+    )
+
+    st.markdown(legend, unsafe_allow_html=True)
+
+    # ----------------------------------------------
+    # 요일 출력
+    # ----------------------------------------------
+
     weekdays = ["월", "화", "수", "목", "금", "토", "일"]
 
     cols = st.columns(7)
@@ -176,87 +215,144 @@ with col1:
     for i, weekday in enumerate(weekdays):
         cols[i].write(weekday)
 
-    # 월간 달력 생성
+    # ----------------------------------------------
+    # 월간 달력
+    # ----------------------------------------------
+
     weeks = calendar.monthcalendar(year, month)
 
     for week in weeks:
+
         cols = st.columns(7)
 
         for i, day in enumerate(week):
 
-            if day != 0:
-                current_date = date(year, month, day)
+            if day == 0:
+                continue
 
-                has_schedule = any(
-                    item["date"] == str(current_date)
-                    for item in st.session_state.schedules
+            current_date = date(year, month, day)
+            current_date_str = str(current_date)
+
+            # 해당 날짜 일정
+            daily_schedules = [
+                item
+                for item in st.session_state.schedules
+                if item["date"] == current_date_str
+            ]
+
+            daily_schedules.sort(
+                key=lambda x: x["start"]
+            )
+
+            # 해당 날짜 마감 To-do
+            daily_todos = [
+                item
+                for item in st.session_state.todos
+                if item["deadline"][:10] == current_date_str
+            ]
+
+            # 마우스 오버 시 표시할 내용
+            tooltip_lines = []
+
+            for item in daily_schedules:
+                tooltip_lines.append(
+                    f"일정: {item['start']}~{item['end']} "
+                    f"{item['schedule']}"
                 )
 
-                label = f"{day} 📌" if has_schedule else str(day)
+            for item in daily_todos:
+                status = "완료" if item["done"] else "미완료"
 
-                with cols[i]:
-                    if st.button(
-                        label,
-                        key=f"date_{current_date}",
-                        use_container_width=True
-                    ):
-                        st.session_state.selected_date = current_date
-                        st.rerun()
+                tooltip_lines.append(
+                    f"To-do: {item['task']} ({status})"
+                )
 
-    # 일정 등록
+            tooltip = "\n\n".join(tooltip_lines)
+
+            if not tooltip:
+                tooltip = "등록된 일정과 업무가 없습니다."
+
+            # 날짜 버튼
+            with cols[i]:
+
+                if st.button(
+                    str(day),
+                    key=f"date_{current_date}",
+                    help=tooltip,
+                    use_container_width=True
+                ):
+                    st.session_state.selected_date = current_date
+                    st.rerun()
+
+                # 일정 제목을 글자로 표시
+                for item in daily_schedules[:2]:
+
+                    project = item.get("project", "일반")
+
+                    color = PROJECT_COLORS.get(
+                        project, "#64748b"
+                    )
+
+                    title = html.escape(
+                        item["schedule"][:12]
+                    )
+
+                    st.markdown(
+                        f'<div style="'
+                        f'color:{color};'
+                        f'font-size:11px;'
+                        f'font-weight:600;'
+                        f'overflow-wrap:anywhere;'
+                        f'">'
+                        f'• {title}'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+
+                if len(daily_schedules) > 2:
+                    st.caption(
+                        f"+{len(daily_schedules) - 2}개"
+                    )
+
+    # ----------------------------------------------
+    # 선택한 날짜의 일정 및 To-do
+    # ----------------------------------------------
+
     selected_date = st.session_state.selected_date
 
     st.divider()
-    st.subheader(f"📝 {selected_date} 일정")
+    st.subheader(f"📆 {selected_date} 상세 일정")
 
-    with st.form("schedule_form", clear_on_submit=True):
-
-        schedule = st.text_input("일정 내용")
-
-        start_time = st.time_input(
-            "시작 시간",
-            value=time(9, 0)
-        )
-
-        end_time = st.time_input(
-            "종료 시간",
-            value=time(10, 0)
-        )
-
-        schedule_submit = st.form_submit_button("일정 등록")
-
-    if schedule_submit:
-
-        if not schedule.strip():
-            st.warning("일정 내용을 입력하세요.")
-
-        elif start_time >= end_time:
-            st.error("종료 시간은 시작 시간보다 늦어야 합니다.")
-
-        else:
-            st.session_state.schedules.append({
-                "id": str(uuid4()),
-                "date": str(selected_date),
-                "start": str(start_time)[:5],
-                "end": str(end_time)[:5],
-                "schedule": schedule.strip()
-            })
-
-            st.success("일정이 등록되었습니다.")
-
-    # 선택 날짜 일정 조회 및 삭제
     daily_schedules = [
-        item for item in st.session_state.schedules
+        item
+        for item in st.session_state.schedules
         if item["date"] == str(selected_date)
     ]
 
-    daily_schedules.sort(key=lambda x: x["start"])
+    daily_schedules.sort(
+        key=lambda x: x["start"]
+    )
+
+    if not daily_schedules:
+        st.info("등록된 일정이 없습니다.")
 
     for item in daily_schedules:
+
+        project = item.get("project", "일반")
+
+        color = PROJECT_COLORS.get(
+            project, "#64748b"
+        )
 
         c1, c2 = st.columns([5, 1])
 
         with c1:
+            st.markdown(
+                f'<span style="color:{color};">'
+                f'● {html.escape(project)}</span>',
+                unsafe_allow_html=True
+            )
+
             st.write(
                 f"⏰ {item['start']} ~ {item['end']}"
                 f" | {item['schedule']}"
@@ -268,10 +364,191 @@ with col1:
                 key=f"schedule_delete_{item['id']}"
             ):
                 st.session_state.schedules = [
-                    x for x in st.session_state.schedules
+                    x
+                    for x in st.session_state.schedules
                     if x["id"] != item["id"]
                 ]
+
                 st.rerun()
+
+    # 해당 날짜 To-do 표시
+    st.markdown("#### ✅ 해당 날짜 마감 To-do")
+
+    daily_todos = [
+        item
+        for item in st.session_state.todos
+        if item["deadline"][:10] == str(selected_date)
+    ]
+
+    if not daily_todos:
+        st.caption("해당 날짜에 마감되는 업무가 없습니다.")
+
+    for item in daily_todos:
+
+        status = "✅ 완료" if item["done"] else "⬜ 미완료"
+
+        st.write(
+            f"{status} | {item['task']} "
+            f"| {item['deadline'][11:16]}"
+        )
+
+    # ----------------------------------------------
+    # 일정 수동 등록
+    # ----------------------------------------------
+
+    st.divider()
+    st.subheader("➕ 일정 등록")
+
+    with st.form("schedule_form", clear_on_submit=True):
+
+        project = st.selectbox(
+            "프로젝트 선택",
+            list(PROJECT_COLORS.keys())
+        )
+
+        schedule = st.text_input(
+            "일정 내용",
+            placeholder="예: 프로젝트 팀 회의"
+        )
+
+        start_time = st.time_input(
+            "시작 시간",
+            value=time(9, 0)
+        )
+
+        end_time = st.time_input(
+            "종료 시간",
+            value=time(10, 0)
+        )
+
+        schedule_submit = st.form_submit_button(
+            "일정 등록"
+        )
+
+    if schedule_submit:
+
+        if not schedule.strip():
+            st.warning("일정 내용을 입력하세요.")
+
+        elif start_time >= end_time:
+            st.error(
+                "종료 시간은 시작 시간보다 늦어야 합니다."
+            )
+
+        else:
+            # 캘린더 일정 저장
+            st.session_state.schedules.append({
+                "id": str(uuid4()),
+                "date": str(selected_date),
+                "start": start_time.strftime("%H:%M"),
+                "end": end_time.strftime("%H:%M"),
+                "schedule": schedule.strip(),
+                "project": project
+            })
+
+            st.success("캘린더에 일정이 등록되었습니다.")
+
+            # --------------------------------------
+            # 등록 일정 관련 추천 To-do 생성
+            # --------------------------------------
+
+            recommendations = []
+
+            schedule_text = schedule.strip()
+
+            if "회의" in schedule_text:
+                recommendations = [
+                    "회의 안건 정리",
+                    "회의 자료 준비",
+                    "회의 참석자 확인"
+                ]
+
+            elif "발표" in schedule_text:
+                recommendations = [
+                    "발표 자료 제작",
+                    "발표 대본 작성",
+                    "발표 리허설"
+                ]
+
+            elif "보고서" in schedule_text:
+                recommendations = [
+                    "자료 조사",
+                    "보고서 초안 작성",
+                    "보고서 최종 검토"
+                ]
+
+            elif "프로젝트" in schedule_text:
+                recommendations = [
+                    "프로젝트 진행 상황 점검",
+                    "담당 업무 확인",
+                    "필요 자료 정리"
+                ]
+
+            # 추천은 자동으로 To-do에 저장하지 않음
+            st.session_state.calendar_recommendations = [
+                {
+                    "id": str(uuid4()),
+                    "task": task,
+                    "deadline": (
+                        f"{selected_date} "
+                        f"{start_time.strftime('%H:%M')}"
+                    )
+                }
+                for task in recommendations
+            ]
+
+    # ----------------------------------------------
+    # 추천 To-do 표시 및 선택적 추가
+    # ----------------------------------------------
+
+    if st.session_state.calendar_recommendations:
+
+        st.divider()
+        st.subheader("💡 추천 To-do List")
+
+        st.caption(
+            "등록한 일정과 관련된 추천 업무입니다. "
+            "필요한 항목만 선택해 추가하세요."
+        )
+
+        for item in st.session_state.calendar_recommendations:
+
+            c1, c2 = st.columns([5, 1])
+
+            with c1:
+                st.write(f"• {item['task']}")
+
+                st.caption(
+                    f"권장 마감: {item['deadline']}"
+                )
+
+            with c2:
+                if st.button(
+                    "추가",
+                    key=f"recommend_add_{item['id']}"
+                ):
+
+                    deadline = datetime.strptime(
+                        item["deadline"],
+                        "%Y-%m-%d %H:%M"
+                    )
+
+                    st.session_state.todos.append({
+                        "id": str(uuid4()),
+                        "task": item["task"],
+                        "deadline": deadline.isoformat(
+                            timespec="minutes"
+                        ),
+                        "done": False
+                    })
+
+                    st.session_state.calendar_recommendations = [
+                        x
+                        for x in st.session_state.calendar_recommendations
+                        if x["id"] != item["id"]
+                    ]
+
+                    st.rerun()
 
 
 # ==================================================
