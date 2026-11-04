@@ -21,15 +21,15 @@ sys_role = """
 if "messages" not in st.session_state:
     st.session_state.messages = []  
 
+
 # ==================================================
-# 추가 기능 1. 캘린더
+# 추가 기능: 캘린더 + To-do List + 키워드 등록
 # ==================================================
 
 import calendar
-from datetime import date
-
-st.divider()
-st.title("📅 ABLE 일정 및 업무 관리")
+import re
+from datetime import date, datetime, time
+from uuid import uuid4
 
 # 상태 초기화
 if "schedules" not in st.session_state:
@@ -38,30 +38,117 @@ if "schedules" not in st.session_state:
 if "todos" not in st.session_state:
     st.session_state.todos = []
 
+if "selected_date" not in st.session_state:
+    st.session_state.selected_date = date.today()
+
 if "calendar_year" not in st.session_state:
     st.session_state.calendar_year = date.today().year
 
 if "calendar_month" not in st.session_state:
     st.session_state.calendar_month = date.today().month
 
-if "selected_date" not in st.session_state:
-    st.session_state.selected_date = date.today()
+
+# ==================================================
+# 1. 텍스트 및 음성 명령 분석 함수
+# ==================================================
+
+def register_command(text):
+
+    text = text.strip()
+
+    # 캘린더 등록 명령
+    # 형식: 일정 등록 2026-11-05 14:00 15:00 팀 회의
+    calendar_match = re.fullmatch(
+        r"일정\s*등록\s+"
+        r"(\d{4}-\d{2}-\d{2})\s+"
+        r"(\d{2}:\d{2})\s+"
+        r"(\d{2}:\d{2})\s+(.+)",
+        text
+    )
+
+    if calendar_match:
+        day, start, end, title = calendar_match.groups()
+
+        try:
+            schedule_date = date.fromisoformat(day)
+            start_time = time.fromisoformat(start)
+            end_time = time.fromisoformat(end)
+        except ValueError:
+            return "날짜 또는 시간 형식이 올바르지 않습니다."
+
+        if start_time >= end_time:
+            return "종료 시간은 시작 시간보다 늦어야 합니다."
+
+        st.session_state.schedules.append({
+            "id": str(uuid4()),
+            "date": str(schedule_date),
+            "start": start,
+            "end": end,
+            "schedule": title.strip()
+        })
+
+        return f"캘린더에 '{title}' 일정이 등록되었습니다."
+
+    # To-do List 등록 명령
+    # 형식: 할 일 추가 2026-11-06 18:00 발표 자료 제출
+    todo_match = re.fullmatch(
+        r"할\s*일\s*추가\s+"
+        r"(\d{4}-\d{2}-\d{2})\s+"
+        r"(\d{2}:\d{2})\s+(.+)",
+        text
+    )
+
+    if todo_match:
+        day, deadline_time, task = todo_match.groups()
+
+        try:
+            deadline = datetime.strptime(
+                f"{day} {deadline_time}",
+                "%Y-%m-%d %H:%M"
+            )
+        except ValueError:
+            return "마감 날짜 또는 시간이 올바르지 않습니다."
+
+        st.session_state.todos.append({
+            "id": str(uuid4()),
+            "task": task.strip(),
+            "deadline": deadline.isoformat(timespec="minutes"),
+            "done": False
+        })
+
+        return f"To-do List에 '{task}' 업무가 추가되었습니다."
+
+    # 키워드는 있지만 등록 정보가 부족한 경우
+    if re.match(r"^(일정\s*등록|할\s*일\s*추가)", text):
+        return "등록할 날짜, 시간, 내용을 정확하게 입력해 주세요."
+
+    return "등록 명령이 아닙니다."
 
 
-# 캘린더와 To-do List 화면 배치
+# ==================================================
+# 2. 캘린더 및 To-do List 화면
+# ==================================================
+
+st.divider()
+st.title("📅 ABLE 일정 및 업무 관리")
+
 col1, col2 = st.columns([2, 1])
 
+# ==================================================
+# 3. 캘린더
+# ==================================================
+
 with col1:
+
     st.subheader("📅 캘린더")
 
     year = st.session_state.calendar_year
     month = st.session_state.calendar_month
 
-    # 월 이동
     c1, c2, c3 = st.columns([1, 4, 1])
 
     with c1:
-        if st.button("◀"):
+        if st.button("◀", key="prev_month"):
             if month == 1:
                 st.session_state.calendar_year -= 1
                 st.session_state.calendar_month = 12
@@ -73,7 +160,7 @@ with col1:
         st.markdown(f"### {year}년 {month}월")
 
     with c3:
-        if st.button("▶"):
+        if st.button("▶", key="next_month"):
             if month == 12:
                 st.session_state.calendar_year += 1
                 st.session_state.calendar_month = 1
@@ -83,18 +170,20 @@ with col1:
 
     # 요일 표시
     weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+
     cols = st.columns(7)
 
-    for i, day_name in enumerate(weekdays):
-        cols[i].write(day_name)
+    for i, weekday in enumerate(weekdays):
+        cols[i].write(weekday)
 
-    # 월간 달력 표시
+    # 월간 달력 생성
     weeks = calendar.monthcalendar(year, month)
 
     for week in weeks:
         cols = st.columns(7)
 
         for i, day in enumerate(week):
+
             if day != 0:
                 current_date = date(year, month, day)
 
@@ -115,68 +204,124 @@ with col1:
                         st.rerun()
 
     # 일정 등록
-    st.divider()
-
     selected_date = st.session_state.selected_date
+
+    st.divider()
     st.subheader(f"📝 {selected_date} 일정")
 
     with st.form("schedule_form", clear_on_submit=True):
+
         schedule = st.text_input("일정 내용")
-        schedule_time = st.time_input("일정 시간")
+
+        start_time = st.time_input(
+            "시작 시간",
+            value=time(9, 0)
+        )
+
+        end_time = st.time_input(
+            "종료 시간",
+            value=time(10, 0)
+        )
 
         schedule_submit = st.form_submit_button("일정 등록")
 
     if schedule_submit:
-        if schedule.strip():
-            st.session_state.schedules.append({
-                "date": str(selected_date),
-                "time": str(schedule_time),
-                "schedule": schedule.strip()
-            })
-            st.success("일정이 등록되었습니다.")
-        else:
+
+        if not schedule.strip():
             st.warning("일정 내용을 입력하세요.")
 
-    # 일정 조회 및 삭제
-    for i, item in enumerate(st.session_state.schedules):
-        if item["date"] == str(selected_date):
+        elif start_time >= end_time:
+            st.error("종료 시간은 시작 시간보다 늦어야 합니다.")
 
-            c1, c2 = st.columns([5, 1])
+        else:
+            st.session_state.schedules.append({
+                "id": str(uuid4()),
+                "date": str(selected_date),
+                "start": str(start_time)[:5],
+                "end": str(end_time)[:5],
+                "schedule": schedule.strip()
+            })
 
-            with c1:
-                st.write(f"⏰ {item['time']} - {item['schedule']}")
+            st.success("일정이 등록되었습니다.")
 
-            with c2:
-                if st.button("삭제", key=f"schedule_delete_{i}"):
-                    st.session_state.schedules.pop(i)
-                    st.rerun()
+    # 선택 날짜 일정 조회 및 삭제
+    daily_schedules = [
+        item for item in st.session_state.schedules
+        if item["date"] == str(selected_date)
+    ]
+
+    daily_schedules.sort(key=lambda x: x["start"])
+
+    for item in daily_schedules:
+
+        c1, c2 = st.columns([5, 1])
+
+        with c1:
+            st.write(
+                f"⏰ {item['start']} ~ {item['end']}"
+                f" | {item['schedule']}"
+            )
+
+        with c2:
+            if st.button(
+                "삭제",
+                key=f"schedule_delete_{item['id']}"
+            ):
+                st.session_state.schedules = [
+                    x for x in st.session_state.schedules
+                    if x["id"] != item["id"]
+                ]
+                st.rerun()
 
 
 # ==================================================
-# 추가 기능 2. To-do List
+# 4. To-do List
 # ==================================================
 
 with col2:
+
     st.subheader("✅ To-do List")
 
-    # 업무 추가
+    # 업무 등록
     with st.form("todo_form", clear_on_submit=True):
-        task = st.text_input("새로운 할 일")
+
+        task = st.text_input("할 일")
+
+        deadline_date = st.date_input(
+            "마감 날짜",
+            value=date.today()
+        )
+
+        deadline_time = st.time_input(
+            "마감 시간",
+            value=time(18, 0)
+        )
+
         todo_submit = st.form_submit_button("업무 추가")
 
     if todo_submit:
-        if task.strip():
+
+        if not task.strip():
+            st.warning("할 일을 입력하세요.")
+
+        else:
+            deadline = datetime.combine(
+                deadline_date,
+                deadline_time
+            )
+
             st.session_state.todos.append({
+                "id": str(uuid4()),
                 "task": task.strip(),
+                "deadline": deadline.isoformat(timespec="minutes"),
                 "done": False
             })
-            st.success("할 일이 추가되었습니다.")
-        else:
-            st.warning("할 일을 입력하세요.")
+
+            st.success("업무가 추가되었습니다.")
 
     st.divider()
 
-    # 업무 진행 현황
+    # 완료 현황
     total = len(st.session_state.todos)
 
     completed = sum(
@@ -184,32 +329,82 @@ with col2:
         for item in st.session_state.todos
     )
 
-    st.write(f"완료한 업무: {completed} / {total}")
+    st.write(f"업무 완료: {completed} / {total}")
 
     if total > 0:
         st.progress(completed / total)
 
-    # 업무 목록 및 완료 체크
-    for i, item in enumerate(st.session_state.todos):
+    # 업무 목록
+    for item in st.session_state.todos:
 
         c1, c2 = st.columns([5, 1])
+
+        deadline = datetime.fromisoformat(item["deadline"])
 
         with c1:
             done = st.checkbox(
                 item["task"],
                 value=item["done"],
-                key=f"todo_{i}"
+                key=f"todo_{item['id']}"
             )
 
-            st.session_state.todos[i]["done"] = done
+            item["done"] = done
+
+            if done:
+                st.success("완료")
+            elif deadline < datetime.now():
+                st.error("마감기한 초과")
+            else:
+                st.caption(
+                    "마감: " +
+                    deadline.strftime("%Y-%m-%d %H:%M")
+                )
 
         with c2:
-            if st.button("❌", key=f"todo_delete_{i}"):
-                st.session_state.todos.pop(i)
+            if st.button(
+                "❌",
+                key=f"todo_delete_{item['id']}"
+            ):
+                st.session_state.todos = [
+                    x for x in st.session_state.todos
+                    if x["id"] != item["id"]
+                ]
                 st.rerun()
 
+
+# ==================================================
+# 5. 텍스트 명령으로 일정 및 업무 등록
+# ==================================================
+
 st.divider()
-st.subheader("🎤 AI 음성 비서") 
+st.subheader("💬 텍스트 일정 등록")
+
+st.caption(
+    "일정 등록 예시: "
+    "일정 등록 2026-11-05 14:00 15:00 팀 회의"
+)
+
+st.caption(
+    "업무 추가 예시: "
+    "할 일 추가 2026-11-06 18:00 발표 자료 제출"
+)
+
+with st.form("command_form"):
+
+    command_text = st.text_input(
+        "등록 명령어를 입력하세요"
+    )
+
+    command_submit = st.form_submit_button("명령 실행")
+
+if command_submit:
+
+    result = register_command(command_text)
+    st.info(result)
+
+st.divider()
+st.subheader("🎤 AI 음성 비서")
+
 
 # 지시 영역
 with st.form("task_form"):
@@ -239,6 +434,15 @@ if submit:
     transcript = client.audio.transcriptions.create(
         model="whisper-1",
         file=("audio.wav", audio_value, "audio/wav"))
+    
+    # 음성 인식 결과 출력
+st.write("🎤 인식된 음성:", transcript.text)
+
+# 음성 명령 분석 및 일정·업무 등록
+command_result = register_command(transcript.text)
+
+if command_result != "등록 명령이 아닙니다.":
+    st.info(command_result)
 
     # 사용자 메시지
     input_messages.append({"role": "user", "content": transcript.text})
