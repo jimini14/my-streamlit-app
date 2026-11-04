@@ -7,7 +7,7 @@ import streamlit as st
 from openai import OpenAI
 
 from app_state import initialize_state, reset_state, save_response
-from assistant import DEFAULT_SYS_ROLE
+from assistant import ASSISTANT_BUILD, DEFAULT_SYS_ROLE
 from calendar_ui import render_calendar, render_todos
 from command_service import MissingInputError, run_command
 from meeting_planner import analyze_meeting, save_analysis
@@ -19,6 +19,7 @@ initialize_state()
 
 with st.sidebar:
     st.header("🤖 에이블")
+    st.caption(f"메일 처리 버전: {ASSISTANT_BUILD}")
     st.subheader("📥 회의록과 명령")
     uploaded_file = st.file_uploader(
         "회의록 텍스트 파일 (.txt)", type=["txt"],
