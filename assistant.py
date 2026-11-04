@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from openai import OpenAI
 from email_utils import send_email, EMAIL_TOOLS
 
-ASSISTANT_BUILD = "email-tool-one-pass-v2"
+ASSISTANT_BUILD = "email-fixed-recipient-v3"
 
 # 기본 개인비서 '에이블' 페르소나 (출처: 6 - 미션 3)
 DEFAULT_SYS_ROLE = """당신은 '김 대리'의 개인 비서 '에이블'입니다.
@@ -84,7 +84,8 @@ def run_assistant(client: OpenAI, sys_role: str, conversation_history: list, cur
         else:
             try:
                 args = json.loads(tool_call.function.arguments)
-                target_to = (args.get("to") or default_recipient).strip()
+                # 수신자는 화면에서 입력한 주소만 사용합니다.
+                target_to = default_recipient.strip()
                 subject = args.get("subject") or "미팅 요약 및 업무 보고"
                 body = args.get("body") or ""
                 if not target_to:
