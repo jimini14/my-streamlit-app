@@ -1,12 +1,13 @@
 # (출처: 6 - 미션 2. 기본 응답 / 6 - 미션 3. 미팅 요약 / 6 - 미션 6. 대화 결합 / 6 - 미션 7. 도구 실행)
 import json
+from datetime import datetime, timedelta, timezone
 from openai import OpenAI
 from email_utils import send_email, EMAIL_TOOLS
 
 # 기본 개인비서 '에이블' 페르소나 (출처: 6 - 미션 3)
 DEFAULT_SYS_ROLE = """당신은 '김 대리'의 개인 비서 '에이블'입니다.
 김 대리의 요청에 친절하고 정중하게 한국어로 답변합니다.
- 
+
 회의록이 제공되면 다음 순서로 처리합니다.
 1. 결정 사항과 핵심 내용을 간결하게 요약합니다.
 2. 일정과 해야 할 일을 모두 추출합니다. 각 항목에 제목, 담당자, 관련자, 기한 또는 일시,
@@ -46,7 +47,11 @@ def run_assistant(client: OpenAI, sys_role: str, conversation_history: list, cur
     LLM 호출 및 Function Calling(이메일 발송) 여부를 확인하고 처리합니다.
     반환값: (답변 텍스트, 이메일 발송 상태 메시지)
     """
-    messages = [{"role": "system", "content": sys_role}]
+    today = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+    messages = [
+        {"role": "system", "content": sys_role},
+        {"role": "system", "content": f"오늘 날짜(한국 시간): {today}"},
+    ]
 
     # 이전 대화 기록 누적 (출처: 2 - 5. 리스트 상태 관리)
     for msg in conversation_history:
