@@ -37,10 +37,6 @@ EMAIL_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "to": {
-                        "type": "string",
-                        "description": "받는 사람의 이메일 주소"
-                    },
                     "subject": {
                         "type": "string",
                         "description": "이메일 제목"
@@ -50,7 +46,7 @@ EMAIL_TOOLS = [
                         "description": "이메일 본문 내용"
                     }
                 },
-                "required": ["to", "subject", "body"]
+                "required": ["subject", "body"]
             }
         }
     }
