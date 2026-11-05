@@ -31,6 +31,12 @@ def initialize_state() -> None:
         st.session_state.calendar_month = korea_today().month
     if "meeting_summary" not in st.session_state:
         st.session_state.meeting_summary = ""
+    if "meeting_summary_audio" not in st.session_state:
+        st.session_state.meeting_summary_audio = None
+    if "meeting_summary_audio_error" not in st.session_state:
+        st.session_state.meeting_summary_audio_error = ""
+    if "meeting_summary_autoplay" not in st.session_state:
+        st.session_state.meeting_summary_autoplay = False
     if "meeting_analysis" not in st.session_state:
         st.session_state.meeting_analysis = None
     if "meeting_analysis_hash" not in st.session_state:
@@ -52,7 +58,9 @@ def reset_state() -> None:
     st.session_state.schedules.clear()
     st.session_state.todos.clear()
     st.session_state.meeting_summary = ""
-    st.session_state.summary_audio = None
+    st.session_state.meeting_summary_audio = None
+    st.session_state.meeting_summary_audio_error = ""
+    st.session_state.meeting_summary_autoplay = False
     st.session_state.meeting_analysis = None
     st.session_state.meeting_analysis_hash = None
     st.session_state.calendar_recommendations = []
