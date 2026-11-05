@@ -1,5 +1,5 @@
 """Compact calendar with event labels, manual registration, recommendations and PNG."""
-import calendar, hashlib, io, json, os
+import calendar, hashlib, io, json, os, textwrap
 from datetime import date, time
 
 import requests
@@ -41,11 +41,12 @@ def _font(size):
 
 
 def _png(lines, title):
+    lines = [w for line in lines for w in textwrap.wrap(str(line), 45) or [""]]  # 긴 줄은 줄바꿈해 전부 표시
     image = Image.new("RGB", (950, max(190, 110 + len(lines) * 36)), "white")
     draw = ImageDraw.Draw(image)
     draw.text((25, 25), title, font=_font(27), fill="#1f2937")
     for i, line in enumerate(lines):
-        draw.text((25, 90 + i * 36), str(line)[:85], font=_font(17), fill="#334155")
+        draw.text((25, 90 + i * 36), str(line), font=_font(17), fill="#334155")
     out = io.BytesIO()
     image.save(out, format="PNG")
     return out.getvalue()
@@ -262,5 +263,5 @@ def render_todos():
         if b.button("❌", key=f"del_todo_{item['id']}"):
             st.session_state.todos.remove(item)
             st.rerun()
-    lines = [("[완료]" if x["done"] else "[미완료]") + " " + x["task"] for x in st.session_state.todos]
+    lines = [("[완료]" if x["done"] else "[미완료]") + f" {x.get('date', '')} " + x["task"] for x in st.session_state.todos]
     st.download_button("📥 To-do PNG", _png(lines, "My To-do List"), file_name="todos.png", mime="image/png")
