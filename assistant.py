@@ -1,12 +1,23 @@
 # (출처: 6 - 미션 2. 기본 응답 / 6 - 미션 3. 미팅 요약 / 6 - 미션 6. 대화 결합 / 6 - 미션 7. 도구 실행)
 import json
+import re
 from datetime import datetime, timedelta, timezone
+
 from openai import OpenAI
-from email_utils import send_email, EMAIL_TOOLS
 
-ASSISTANT_BUILD = "email-fixed-recipient-v3"
+from email_utils import EMAIL_TOOLS, send_email
 
-# 기본 개인비서 '에이블' 페르소나 (출처: 6 - 미션 3)
+ASSISTANT_BUILD = "able-final-v4"
+
+# 이메일 발송 요청 판별 (텍스트·음성 공통) — "메일/이메일" + "보내/전송/발송"
+_EMAIL_WORD = re.compile(r"(이\s*메일|메일|e-?mail|email|이멜)", re.IGNORECASE)
+_SEND_WORD = re.compile(r"(보내|전송|발송|송부|쏴|공유)")
+
+
+def is_email_request(text: str) -> bool:
+    return bool(_EMAIL_WORD.search(text or "") and _SEND_WORD.search(text or ""))
+
+
 DEFAULT_SYS_ROLE = """당신은 '김 대리'의 개인 비서 '에이블'입니다.
 김 대리의 요청에 친절하고 정중하게 한국어로 답변합니다.
 
@@ -37,73 +48,61 @@ DEFAULT_SYS_ROLE = """당신은 '김 대리'의 개인 비서 '에이블'입니�
    현재 사용자가 이메일 발송을 명시적으로 요청한 경우에만 send_email 도구를 호출합니다."""
 
 def build_user_prompt(user_query: str, meeting_text: str = "") -> str:
-    """
-    사용자 지시사항과 업로드된 미팅 파일 내용을 하나로 결합합니다. (출처: 6 - 미션 3, 4)
-    """
+    """사용자 지시사항과 업로드된 미팅 파일 내용을 하나로 결합합니다. (출처: 6 - 미션 3, 4)"""
     if meeting_text.strip():
         return f"{user_query}\n\n[미팅 내용]\n{meeting_text}"
     return user_query
 
-def run_assistant(client: OpenAI, sys_role: str, conversation_history: list, current_prompt: str, default_recipient: str = ""):
-    """
-    LLM 호출 및 Function Calling(이메일 발송) 여부를 확인하고 처리합니다.
-    반환값: (답변 텍스트, 이메일 발송 상태 메시지)
-    """
+
+def run_assistant(client: OpenAI, sys_role: str, conversation_history: list, current_prompt: str,
+                  default_recipient: str = "", force_email: bool = False):
+    """LLM 호출 및 이메일 도구 처리. 반환값: (답변 텍스트, 이메일 발송 상태 메시지)
+
+    force_email=True이면 send_email 도구 호출을 강제합니다.
+    (음성 명령은 표현이 다양해 모델이 도구를 건너뛰는 경우가 있어 앱에서 의도를 먼저 판별)"""
     today = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
     messages = [
         {"role": "system", "content": sys_role},
         {"role": "system", "content": f"오늘 날짜(한국 시간): {today}"},
     ]
-
-    # 이전 대화 기록 누적 (출처: 2 - 5. 리스트 상태 관리)
-    for msg in conversation_history:
+    for msg in conversation_history:  # 이전 대화 기록 누적 (멀티턴)
         messages.append({"role": msg["role"], "content": msg["content"]})
-
-    # 현재 턴의 최종 프롬프트 추가
     messages.append({"role": "user", "content": current_prompt})
 
-    # LLM 1차 호출 (도구 호출 여부 확인)
+    tool_choice = {"type": "function", "function": {"name": "send_email"}} if force_email else "auto"
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        tools=EMAIL_TOOLS,
-        tool_choice="auto"
+        model="gpt-4o-mini", messages=messages, tools=EMAIL_TOOLS, tool_choice=tool_choice,
     )
-
     response_msg = response.choices[0].message
     if not response_msg.tool_calls:
-        return response_msg.content, None
+        return response_msg.content or "", None
 
-    successes, failures = [], []
-    sent_emails = set()
-    email_bodies = []
+    successes, failures, bodies, sent = [], [], [], set()
     for tool_call in response_msg.tool_calls:
-        target_to = ""
         if tool_call.function.name != "send_email":
-            result = {"status": "failed", "error": "지원하지 않는 도구입니다."}
-        else:
-            try:
-                args = json.loads(tool_call.function.arguments)
-                # 수신자는 화면에서 입력한 주소만 사용합니다.
-                target_to = default_recipient.strip()
-                subject = args.get("subject") or "미팅 요약 및 업무 보고"
-                body = args.get("body") or ""
-                if not target_to:
-                    result = {"status": "failed", "error": "수신자 이메일 주소가 없습니다."}
-                elif (target_to, subject, body) in sent_emails:
-                    result = {"status": "skipped", "reason": "같은 이메일의 중복 발송을 건너뛰었습니다."}
-                else:
-                    sent_emails.add((target_to, subject, body))
-                    email_bodies.append(body)
-                    result = send_email(to=target_to, subject=subject, body=body)
-            except Exception as exc:
-                result = {"status": "failed", "error": f"도구 인수를 처리할 수 없습니다: {exc}"}
-
+            failures.append("지원하지 않는 도구입니다.")
+            continue
+        try:
+            args = json.loads(tool_call.function.arguments or "{}")
+        except json.JSONDecodeError as exc:
+            failures.append(f"도구 인수를 처리할 수 없습니다: {exc}")
+            continue
+        to = default_recipient.strip()          # 수신자는 화면에서 입력한 주소만 사용
+        subject = args.get("subject") or "미팅 요약 및 업무 보고"
+        body = args.get("body") or ""
+        if not to:
+            failures.append("수신자 이메일 주소가 없습니다.")
+            continue
+        if (to, subject, body) in sent:          # 중복 발송 방지
+            continue
+        sent.add((to, subject, body))
+        result = send_email(to=to, subject=subject, body=body)
         if result["status"] == "success":
-            successes.append(target_to)
-        elif result["status"] == "failed":
+            successes.append(to)
+            bodies.append(f"[제목] {subject}\n{body}")
+        else:
             failures.append(result["error"])
-        # 발송 결과는 앱의 답변에 직접 반영합니다. 추가 AI 호출을 하지 않습니다.
+
     if failures:
         status = f"이메일 발송 실패: {'; '.join(failures)}"
         if successes:
@@ -112,9 +111,9 @@ def run_assistant(client: OpenAI, sys_role: str, conversation_history: list, cur
         status = f"이메일 발송 완료: {', '.join(successes)}"
     else:
         status = "중복 이메일 발송을 건너뛰었습니다."
-    answer = response_msg.content or ""
-    if email_bodies:
-        body_text = "\n\n".join(body for body in email_bodies if body)
-        if body_text:
-            answer = f"{answer}\n\n메일 내용:\n{body_text}".strip()
+
+    answer = (response_msg.content or "").strip()
+    if successes:
+        answer = (answer + "\n\n" if answer else "") + f"{', '.join(successes)} 주소로 메일을 보냈습니다."
+        answer += "\n\n메일 내용:\n" + "\n\n".join(bodies)
     return answer or status, status

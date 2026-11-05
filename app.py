@@ -1,166 +1,171 @@
-"""호준님 비서 로직 + 개선된 일정/To-do 화면의 통합 진입점."""
+"""AI 개인비서 '에이블' — 기능 고도화 최종본 (사이드바 없는 3단 대시보드)."""
 import hashlib
+import html
 import os
 
 import streamlit as st
-from openai import OpenAI
 
-from app_state import initialize_state, reset_state, save_response
+from app_state import get_client, initialize_state, korea_today, reset_state, save_response
 from assistant import ASSISTANT_BUILD, DEFAULT_SYS_ROLE
 from audio_utils import text_to_speech
-from calendar_ui_v2 import render_calendar, render_details, render_todos
+from calendar_ui_v2 import render_calendar, render_details
 from command_service import MissingInputError, run_command
 from meeting_planner import analyze_meeting, save_analysis
 from meeting_utils import update_meeting_file
+from todo_ui import render_todos
+from ui_style import AVATAR_IMG, apply_style, avatar, render_hero
 
-st.set_page_config(page_title="AI 개인비서 에이블",page_icon="🤖",layout="wide")
+st.set_page_config(page_title="AI 개인비서 에이블", page_icon=str(AVATAR_IMG) if AVATAR_IMG.exists() else "🤖",
+                   layout="wide")
 initialize_state()
+apply_style()
+
+hero_slot = st.empty()          # 숫자가 최신이 되도록 맨 마지막에 채움
+flash_slot = st.empty()
+left, center, right = st.columns([1.05, 2.75, 1.2], gap="medium")
 
 
-@st.cache_resource
-def get_client():
-    return OpenAI()
+# ======================= 왼쪽: 회의록 · 명령 패널 =======================
+def analyze_uploaded(meeting_content: str):
+    file_key = hashlib.sha256(meeting_content.encode("utf-8")).hexdigest()
+    if st.session_state.meeting_analysis_hash == file_key:
+        return
+    with st.spinner("회의록 분석 중..."):
+        try:
+            client = get_client()
+            analysis = analyze_meeting(client, meeting_content)
+        except Exception as exc:
+            st.error(f"회의록 분석 오류: {exc}")
+            return
+        st.session_state.meeting_analysis = analysis
+        st.session_state.meeting_analysis_hash = file_key
+        st.session_state.meeting_summary = analysis.get("summary", "")
+        st.session_state.meeting_questions = analysis.get("questions", [])
+        added, _ = save_analysis(analysis, file_key)      # 날짜 있는 일정 → 캘린더 자동 등록
+        try:                                               # 요약 음성 미리 생성 → 오른쪽에서 자동 재생
+            st.session_state.summary_audio = text_to_speech(client, "회의 요약입니다. " + st.session_state.meeting_summary)
+            st.session_state.summary_autoplay = True
+        except Exception as exc:
+            st.session_state.summary_audio = None
+            st.warning(f"요약 음성 생성 오류: {exc}")
+        st.session_state.flash = f"회의록 분석 완료! 일정 {added}건을 캘린더에 등록했어요."
 
 
-# 호준님 파일의 사이드바·멀티턴 처리 방식을 유지합니다.
-with st.sidebar:
-    if os.path.exists("able_character.png"):
-        st.image("able_character.png")  # 에이블 캐릭터
-    st.header("🤖 에이블")
-    st.caption(f"메일 처리 버전: {ASSISTANT_BUILD}")
-    st.subheader("📥 회의록과 명령")
-    uploaded_file=st.file_uploader("회의록 텍스트 파일 (.txt)",type=["txt"],key=f"meeting_file_{st.session_state.upload_version}")
-    try:
-        meeting_content=update_meeting_file(uploaded_file)
-    except UnicodeDecodeError:
-        meeting_content=""
-        st.error("UTF-8 형식의 TXT 파일을 업로드해 주세요.")
+with left:
+    with st.container(border=True):
+        st.markdown("**📥 회의록 업로드**")
+        uploaded_file = st.file_uploader("회의록 텍스트 파일 (.txt)", type=["txt"],
+                                         key=f"meeting_file_{st.session_state.upload_version}",
+                                         label_visibility="collapsed")
+        try:
+            meeting_content = update_meeting_file(uploaded_file)
+        except UnicodeDecodeError:
+            meeting_content = ""
+            st.error("UTF-8 형식의 TXT 파일을 올려 주세요.")
+        if meeting_content:
+            analyze_uploaded(meeting_content)
+            if st.toggle("회의록 본문 보기", key="show_meeting_text"):
+                st.text_area("회의록 본문", meeting_content, height=180, disabled=True,
+                             label_visibility="collapsed")
+        else:
+            st.caption("TXT 회의록을 올리면 요약·일정·추천 할 일을 정리해요.")
 
-    if uploaded_file is None:
-        st.info("회의록을 올리면 일정이 캘린더에 바로 등록되고 요약을 음성으로 들려 드립니다.")
-    elif meeting_content:
-        st.caption(f"업로드: {uploaded_file.name}")
-        with st.expander("회의록 본문 보기"):
-            st.text_area("미팅 본문",meeting_content,height=180,disabled=True)
-        file_key=hashlib.sha256(meeting_content.encode('utf-8')).hexdigest()
-        if st.session_state.get('meeting_analysis_hash') != file_key:
-            with st.spinner('회의록 분석 및 캘린더 등록 중...'):
-                try:
-                    analysis=analyze_meeting(get_client(),meeting_content)
-                except Exception as exc:
-                    st.error(f'회의록 분석 오류: {exc}')
-                else:
-                    st.session_state.meeting_analysis=analysis
-                    st.session_state.meeting_analysis_hash=file_key
-                    # 회의록의 일정을 캘린더에 바로 등록 (회의/마감기한 색 구분)
-                    added=save_analysis(analysis,file_key)
-                    # 회의 요약을 음성으로 만들어 오른쪽 상단에서 자동 재생
-                    summary=st.session_state.meeting_summary
-                    if summary:
-                        try:
-                            st.session_state.summary_audio=text_to_speech(get_client(),'회의 요약입니다. '+summary)
-                            st.session_state.summary_autoplay=True
-                        except Exception as exc:
-                            st.session_state.summary_audio=None
-                            st.warning(f'요약 음성 생성 오류: {exc}')
-                    st.success(f'분석 완료! 일정 {added}건을 캘린더에 등록했습니다.')
+    with st.container(border=True):
+        st.markdown("**🎙️ 에이블에게 말하기**")
+        with st.form("command_form", clear_on_submit=True, border=False):
+            text_query = st.text_input("텍스트 명령", placeholder="예: 회의 요약을 메일로 보내 줘")
+            audio_query = st.audio_input("음성 명령")
+            submitted = st.form_submit_button("실행하기", type="primary", width="stretch")
+        recipient_email = st.text_input("수신자 이메일", value=os.getenv("RECIPIENT_EMAIL", ""),
+                                        placeholder="name@example.com")
 
-    st.divider()
-    recipient_email=st.text_input("수신자 이메일 주소",value=os.getenv('RECIPIENT_EMAIL',''))
-    with st.expander('에이블 페르소나 (프롬프트)'):
-        sys_role=st.text_area('시스템 역할',value=DEFAULT_SYS_ROLE,height=220)
-    if st.button('대화 및 일정 초기화',use_container_width=True):
+    if "sys_role_value" not in st.session_state:
+        st.session_state.sys_role_value = DEFAULT_SYS_ROLE
+    if st.toggle("에이블 페르소나 수정", key="show_persona"):
+        if "sys_role_input" not in st.session_state:
+            st.session_state.sys_role_input = st.session_state.sys_role_value
+        st.text_area("시스템 역할", key="sys_role_input", height=220, label_visibility="collapsed")
+        st.session_state.sys_role_value = st.session_state.sys_role_input
+    if st.button("대화 및 일정 초기화", width="stretch"):
         reset_state()
-        st.session_state.meeting_analysis_hash=None
         st.rerun()
-    # 텍스트 명령: 입력 후 '실행하기'
-    with st.form('command_form',clear_on_submit=True):
-        text_query=st.text_input('텍스트 질문/명령')
-        submitted=st.form_submit_button('실행하기',use_container_width=True)
 
-    # 음성 명령: 폼 밖에 두어 녹음을 멈추면 바로 실행됩니다.
-    # (폼 안에 있으면 '실행하기'를 눌러야만 전송되고, 이전 녹음이 남아 다시 쓰이는 문제가 있었습니다.)
-    voice_version=st.session_state.voice_versions.get('voice_command',0)
-    voice_query=st.audio_input('🎙️ 음성으로 질문하기 (녹음을 멈추면 바로 실행)',key=f'voice_command_{voice_version}')
-    st.caption('마이크 아이콘을 눌러 말하고, 다시 눌러 녹음을 멈추세요. 브라우저의 마이크 권한을 허용해야 합니다.')
+    if submitted:
+        if not (text_query or "").strip() and audio_query is None:
+            st.warning("텍스트를 입력하거나 음성을 녹음해 주세요.")
+        else:
+            with st.spinner("에이블이 처리 중입니다..."):
+                try:
+                    result = run_command(get_client(), text_query, audio_query, meeting_content,
+                                         st.session_state.sys_role_value, st.session_state.messages,
+                                         recipient_email)
+                except MissingInputError as exc:
+                    st.warning(str(exc))
+                except Exception as exc:
+                    st.error(f"명령 실행 오류: {exc}")
+                else:
+                    save_response(result.user_prompt, result.answer, result.audio_bytes)
+                    if result.email_status:
+                        (st.success if result.email_status.startswith("이메일 발송 완료") else st.error)(result.email_status)
+                    if result.audio_error:
+                        st.warning(f"음성 응답 생성 오류: {result.audio_error}")
 
-    # 직전 실행 결과(인식된 문장, 오류 등) 표시
-    for level,text in st.session_state.voice_notice.pop('command',[]):
-        getattr(st,level)(text)
 
-voice_bytes=None
-if voice_query is not None:
-    data=voice_query.getvalue()
-    digest=hashlib.sha256(data).hexdigest()
-    if digest not in st.session_state.processed_voice:   # 같은 녹음을 두 번 처리하지 않습니다.
-        st.session_state.processed_voice.add(digest)
-        st.session_state.voice_versions['voice_command']=voice_version+1   # 다음 화면에서 녹음기를 비웁니다.
-        voice_bytes=data
-
-if voice_bytes is not None or submitted:
-    notices=[]
-    if voice_bytes is None and not text_query.strip():
-        notices.append(('warning','텍스트 입력 또는 음성 녹음이 필요합니다.'))
-    else:
-        with st.spinner('에이블이 처리 중입니다...'):
-            try:
-                result=run_command(get_client(),text_query,voice_bytes,meeting_content,sys_role,st.session_state.messages,recipient_email)
-            except MissingInputError as exc:
-                notices.append(('warning',str(exc)))
-            except Exception as exc:
-                notices.append(('error',f'명령 실행 오류: {exc}'))
-            else:
-                save_response(result.user_prompt,result.answer,result.audio_bytes)
-                if voice_bytes is not None:
-                    notices.append(('success',f'🎙️ 인식된 질문: {result.user_prompt}'))
-                if result.email_status:
-                    notices.append(('success' if result.email_status.startswith('이메일 발송 완료') else 'error',result.email_status))
-                if result.audio_error:
-                    notices.append(('warning',f'음성 응답 생성 오류: {result.audio_error}'))
-    st.session_state.voice_notice['command']=notices
-    st.rerun()
-
-st.title('🗓️ ABLE 일정 및 업무 관리')
-st.caption('회의록을 업로드하면 일정이 캘린더에 바로 등록되고(회의=파랑, 마감기한=빨강), 오른쪽 위에서 회의 요약이 음성으로 재생됩니다.')
-
-# 왼쪽 사이드바 / 가운데 넓은 영역 / 오른쪽 좁은 영역
-main,right=st.columns([3.6,1.15],gap='large')
-with right:
-    st.subheader('📋 회의 요약')
-    if st.session_state.summary_audio:
-        # 업로드 직후 한 번만 자동 재생합니다. (이후에는 재생 버튼으로 다시 듣기)
-        st.audio(st.session_state.summary_audio,format='audio/mp3',autoplay=st.session_state.summary_autoplay)
-        st.session_state.summary_autoplay=False
-    if st.session_state.meeting_summary:
-        st.write(st.session_state.meeting_summary)
-    else:
-        st.info('회의록을 업로드하면 요약이 바로 나타나고 음성으로 재생됩니다.')
-    if st.session_state.meeting_questions:
-        with st.expander('확인 필요한 사항'):
-            for question in st.session_state.meeting_questions:
-                st.write('• '+question)
-    st.divider()
-    render_todos(get_client)
-with main:
+# ======================= 가운데: 캘린더 · 상세 일정 =======================
+with center:
     render_calendar()
-    st.divider()
-    render_details(get_client)
+    st.write("")
+    render_details()
 
+
+# ======================= 오른쪽: 회의 요약 · To-do =======================
+with right:
+    with st.container(border=True):
+        st.subheader("📋 회의 요약")
+        if st.session_state.meeting_summary:
+            if st.session_state.summary_audio:
+                # 분석 직후 한 번 자동 재생, 이후에는 ▶로 다시 듣기
+                st.audio(st.session_state.summary_audio, format="audio/mp3",
+                         autoplay=st.session_state.summary_autoplay)
+                st.session_state.summary_autoplay = False
+            st.write(st.session_state.meeting_summary)
+            if st.session_state.meeting_questions:
+                st.markdown("**확인 필요한 사항**")
+                st.markdown("".join(f'<div style="line-height:1.6;">• {html.escape(q)}</div>'
+                                    for q in st.session_state.meeting_questions), unsafe_allow_html=True)
+        else:
+            st.caption("회의록을 올리면 요약이 나타나고 바로 음성으로 읽어 드려요.")
+    with st.container(border=True):
+        render_todos()
+
+
+# ======================= 하단: 에이블의 답변 (최신이 위) =======================
 st.divider()
-st.subheader('💬 에이블의 답변')
-messages=st.session_state.messages
-if messages:
-    # 최신 답변이 위로 오도록 (질문, 답변) 묶음을 역순으로 표시합니다.
-    pairs=[messages[i:i+2] for i in range(0,len(messages),2)]
-    for index,pair in enumerate(reversed(pairs)):
-        if index==0 and st.session_state.audio_bytes:
-            st.audio(st.session_state.audio_bytes,format='audio/mp3')
-        for message in pair:
-            with st.chat_message(message['role']):
-                st.write(message['content'])
-        if index==0 and len(pairs)>1:
-            st.caption('▼ 이전 대화')
+st.subheader("💬 에이블의 답변")
+msgs = st.session_state.messages
+if msgs:
+    turns = [msgs[i:i + 2] for i in range(0, len(msgs), 2)]
+    for n, turn in enumerate(reversed(turns)):
+        if n == 0 and st.session_state.audio_bytes:
+            st.audio(st.session_state.audio_bytes, format="audio/mp3")
+        for m in turn:
+            with st.chat_message(m["role"], avatar=avatar() if m["role"] == "assistant" else "🧑‍💼"):
+                st.write(m["content"])
+        if n < len(turns) - 1:
+            st.markdown('<hr style="margin:4px 0 12px;border:none;border-top:1px solid #EEF0F4;">',
+                        unsafe_allow_html=True)
 else:
-    st.info('사이드바에서 텍스트 또는 음성 명령을 실행하면 답변이 표시됩니다.')
+    st.caption("왼쪽에서 텍스트 또는 음성으로 명령하면 답변이 여기에 최신순으로 표시됩니다.")
 
-st.caption('일정·To-do는 현재 접속 세션에만 유지되며 서버 재시작 후 사라질 수 있습니다.')
+st.caption(f"버전 {ASSISTANT_BUILD} · 일정·To-do는 현재 접속 세션에만 유지됩니다.")
+
+# ======================= 마지막: 상단 영역 채우기 =======================
+today, sch = korea_today(), st.session_state.schedules
+prefix = f"{st.session_state.calendar_year}-{st.session_state.calendar_month:02d}-"
+with hero_slot.container():
+    render_hero(today_count=sum(e["date"] == today.isoformat() for e in sch),
+                month_count=sum(e["date"].startswith(prefix) for e in sch),
+                open_todos=sum(not t["done"] for t in st.session_state.todos))
+if st.session_state.flash:
+    flash_slot.success(st.session_state.flash)
+    st.session_state.flash = None
