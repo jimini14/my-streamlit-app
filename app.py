@@ -9,7 +9,8 @@ from app_state import initialize_state, reset_state, save_response
 from assistant import ASSISTANT_BUILD, DEFAULT_SYS_ROLE
 from calendar_ui_v2 import render_calendar, render_details, render_todos
 from command_service import MissingInputError, run_command
-from meeting_planner import analyze_meeting
+from audio_utils import text_to_speech
+from meeting_planner import analyze_meeting, brief_summary
 from meeting_utils import update_meeting_file
 
 st.set_page_config(page_title="AI 개인비서 에이블",page_icon="🤖",layout="wide")
@@ -37,9 +38,15 @@ with st.sidebar:
         if st.session_state.get('meeting_analysis_hash') != file_key:
             with st.spinner('회의록 분석 중...'):
                 try:
-                    analysis=analyze_meeting(OpenAI(),meeting_content)
+                    client=OpenAI()
+                    analysis=analyze_meeting(client,meeting_content)
                     st.session_state.meeting_analysis=analysis
-                    st.session_state.meeting_summary=analysis.get('summary','')
+                    # '회의록 분석 결과'를 베이스로 짧은 요약 + 음성을 함께 생성
+                    st.session_state.meeting_summary=brief_summary(client,analysis)
+                    try:
+                        st.session_state.summary_audio=text_to_speech(client,st.session_state.meeting_summary)
+                    except Exception:
+                        st.session_state.summary_audio=None
                     st.session_state.meeting_questions=analysis.get('questions',[])
                     st.session_state.meeting_analysis_hash=file_key
                     st.success('분석 완료! 가운데 추천 목록을 확인해 주세요.')
@@ -93,6 +100,8 @@ with right:
     st.subheader('📋 회의 요약')
     if st.session_state.meeting_summary:
         st.write(st.session_state.meeting_summary)
+        if st.session_state.get('summary_audio'):
+            st.audio(st.session_state.summary_audio,format='audio/mp3')
     else:
         st.info('회의록을 업로드하면 요약이 바로 나타납니다.')
     st.divider()
@@ -103,9 +112,11 @@ st.subheader('💬 에이블의 답변')
 if st.session_state.audio_bytes:
     st.audio(st.session_state.audio_bytes,format='audio/mp3')
 if st.session_state.messages:
-    for message in st.session_state.messages:
-        with st.chat_message(message['role']):
-            st.write(message['content'])
+    msgs=st.session_state.messages  # 질문/답변 쌍을 최신순으로 표시
+    for i in range(len(msgs)-len(msgs)%2-2,-1,-2):
+        for message in msgs[i:i+2]:
+            with st.chat_message(message['role']):
+                st.write(message['content'])
 else:
     st.info('사이드바에서 텍스트 또는 음성 명령을 실행하면 답변이 표시됩니다.')
 
