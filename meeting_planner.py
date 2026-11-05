@@ -115,10 +115,27 @@ def add_todo(title: str, assignee: str = "", parent: str = ""):
            for item in st.session_state.todos):
         return False
     st.session_state.todos.append({
-        "id": uuid4().hex, "task": title, "done": False,
+        "id": uuid4().hex, "task": title, "done": False, "date": korea_today().isoformat(),
         "assignee": assignee, "parent": parent,
     })
     return True
+
+
+def register_schedules(analysis: dict) -> int:
+    """분석된 일정을 캘린더에 바로 반영하고, 첫 일정 달로 이동합니다. (중복은 건너뜀)"""
+    count, days = 0, []
+    for it in analysis.get("schedules", []):
+        try:
+            if add_schedule(it["title"], it["date"], it.get("time", ""), it.get("assignee", ""), it.get("parent", "")):
+                count += 1
+            days.append(date.fromisoformat(it["date"]))
+        except (ValueError, TypeError):
+            pass
+    if days:
+        first = min(days)
+        st.session_state.selected_date = first
+        st.session_state.calendar_year, st.session_state.calendar_month = first.year, first.month
+    return count
 
 
 def save_analysis(analysis: dict, file_key: str) -> tuple[int, int]:
