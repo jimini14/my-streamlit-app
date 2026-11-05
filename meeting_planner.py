@@ -77,6 +77,19 @@ def analyze_meeting(client, meeting_text: str) -> dict:
     return json.loads(content)
 
 
+def brief_summary(client, analysis: dict) -> str:
+    """'회의록 분석 결과'를 바탕으로 2~3문장의 짧은 회의 요약을 만듭니다."""
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "아래 회의록 분석 결과(JSON)를 바탕으로 핵심 결정사항과 주요 일정만 "
+                                          "2~3문장의 한국어로 간단히 요약하세요. 분석 결과에 없는 내용은 쓰지 마세요."},
+            {"role": "user", "content": json.dumps(analysis, ensure_ascii=False)},
+        ],
+    )
+    return (r.choices[0].message.content or analysis.get("summary", "")).strip()
+
+
 def add_schedule(title: str, day: str, time: str = "", assignee: str = "", parent: str = ""):
     day = date.fromisoformat(day).isoformat()
     title = title.strip()
