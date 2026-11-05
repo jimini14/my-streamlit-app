@@ -52,6 +52,7 @@ def reset_state() -> None:
     st.session_state.schedules.clear()
     st.session_state.todos.clear()
     st.session_state.meeting_summary = ""
+    st.session_state.summary_audio = None
     st.session_state.meeting_analysis = None
     st.session_state.meeting_analysis_hash = None
     st.session_state.calendar_recommendations = []
